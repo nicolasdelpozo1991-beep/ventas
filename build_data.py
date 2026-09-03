@@ -38,7 +38,13 @@ team_pos = {v: i for i, v in enumerate(TEAM7)}
 df['_vb'] = df['vid'].map(team_pos)
 df['_vb'] = df['_vb'].where(df['_vb'].notna(), 7).astype(int)
 
-bucket_meta = [{'id': v, 'nombre': df.loc[df.vid == v, 'vendedor'].iloc[0]} for v in TEAM7]
+# El export trae nombres en MAYÚSCULAS (vendedor y cliente); se muestran en
+# Title Case en el dashboard, pero el matching (vid, ID_cliente) sigue
+# usando los valores originales del export, no este formateo.
+def display_name(s: str) -> str:
+    return s.title()
+
+bucket_meta = [{'id': v, 'nombre': display_name(df.loc[df.vid == v, 'vendedor'].iloc[0])} for v in TEAM7]
 bucket_meta.append({'id': 'otros', 'nombre': 'Otros'})
 
 # ---- client dense index + display name lookup ----
@@ -46,7 +52,7 @@ cli_names = (df.groupby('ID_cliente')['nombre_cliente']
              .agg(lambda s: s.mode().iat[0] if not s.mode().empty else s.iloc[0]))
 cli_ids_sorted = sorted(cli_names.index.tolist())
 cli_pos = {cid: i for i, cid in enumerate(cli_ids_sorted)}
-clientes_lookup = [cli_names[cid] for cid in cli_ids_sorted]
+clientes_lookup = [display_name(cli_names[cid]) for cid in cli_ids_sorted]
 df['_c'] = df['ID_cliente'].map(cli_pos)
 
 # ---- row-level columnar data ----

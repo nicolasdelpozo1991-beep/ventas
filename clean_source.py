@@ -1,10 +1,16 @@
 """
-Paso 1 del pipeline: toma el export .xls crudo del sistema de facturación
-y produce df_full_clean.pkl, el DataFrame limpio que usa build_data.py.
+Paso 1 del pipeline: toma el export .xls/.xlsx crudo del sistema de
+facturación y produce df_full_clean.pkl, el DataFrame limpio que usa
+build_data.py.
 
 Uso:
-    pip install pandas xlrd --break-system-packages
-    python3 clean_source.py facturacion_full.xls df_full_clean.pkl
+    pip install pandas xlrd openpyxl --break-system-packages
+    python3 clean_source.py facturacion_full.xlsx df_full_clean.pkl
+
+Distintos exports del sistema traen los mismos datos con nombres de columna
+distintos (ej. 'vendedor' vs 'nombre_1', 'ID_cliente' vs 'id_cliente'). Este
+script tolera las variantes conocidas vía ALIASES; si aparece un export con
+nombres nuevos, sumar la variante ahí en vez de tocar el resto del script.
 
 Columnas derivadas que agrega (además de las ~52 originales del export):
   - facturacion   = importe_total_mb (monto neto en USD / "moneda base",
@@ -25,21 +31,64 @@ import sys
 import unicodedata
 import pandas as pd
 
+ALIASES = {
+    'vendedor': ['vendedor', 'nombre_1'],
+    'ID_tipo_de_comprobante': ['ID_tipo_de_comprobante', 'id_tipo_de_comprobante'],
+    'ID_cliente': ['ID_cliente', 'id_cliente'],
+    'ID_file': ['ID_file', 'id_file'],
+    'renta_terrester_mb': ['renta_terrester_mb', 'renta_terrestre_mb'],
+}
+
 
 def slug(nombre: str) -> str:
     n = unicodedata.normalize('NFKD', nombre).encode('ascii', 'ignore').decode('ascii')
     return n.strip().lower().replace(' ', '_')
 
 
+def resolve_columns(df: pd.DataFrame) -> pd.DataFrame:
+    rename = {}
+    for target, candidates in ALIASES.items():
+        found = next((c for c in candidates if c in df.columns), None)
+        if found is None:
+            raise KeyError(f'Ninguna de estas columnas está en el export: {candidates}')
+        if found != target:
+            rename[found] = target
+    return df.rename(columns=rename)
+
+
+def parse_fecha(raw: pd.Series) -> pd.Series:
+    fecha = pd.to_datetime(raw, dayfirst=True, format='mixed', errors='coerce')
+
+    # Algún export trae alguna fecha corrupta (ej. milisegundos pegados con
+    # ':' en vez de '.', tipo "12/8/2026 11:54:43:133") que el parser normal
+    # no puede leer. Para esas filas, nos quedamos con el primer token
+    # "DD/MM/YYYY" y lo parseamos aparte en vez de descartar la fila.
+    bad = fecha.isna() & raw.notna()
+    if bad.any():
+        primer_token = raw[bad].astype(str).str.split(' ').str[0]
+        fecha[bad] = pd.to_datetime(primer_token, dayfirst=True, errors='coerce')
+
+    return fecha.dt.normalize()
+
+
 def main(src_xls: str, out_pkl: str):
-    df = pd.read_excel(src_xls, engine='xlrd')
+    engine = 'openpyxl' if src_xls.lower().endswith('.xlsx') else 'xlrd'
+    df = pd.read_excel(src_xls, engine=engine)
+    df = resolve_columns(df)
 
     # Filas sin vendedor asignado (raras, pero existen) -> bucket explícito
     df['vendedor'] = df['vendedor'].fillna('SIN ASIGNAR')
 
     df['facturacion'] = df['importe_total_mb']
     df['rentabilidad'] = df['renta_aerea_mb'] + df['renta_terrester_mb']
-    df['fecha'] = pd.to_datetime(df['fecha_emision'], dayfirst=True, format='mixed').dt.normalize()
+    df['fecha'] = parse_fecha(df['fecha_emision'])
+
+    sin_fecha = df['fecha'].isna()
+    if sin_fecha.any():
+        print(f'AVISO: {sin_fecha.sum()} fila(s) con fecha_emision ilegible, se descartan:')
+        print(df.loc[sin_fecha, ['ID_file', 'ID_tipo_de_comprobante', 'nombre_cliente', 'fecha_emision']])
+        df = df[~sin_fecha].copy()
+
     df['es_nc'] = df['ID_tipo_de_comprobante'].isin(['NCI', 'NEC', 'NED'])
     df['semana'] = df['fecha'] - pd.to_timedelta(df['fecha'].dt.weekday, unit='D')
     df['mes'] = df['fecha'].values.astype('datetime64[M]')

@@ -1,0 +1,7 @@
+# Inputs crudos del sistema de facturación (privados, no versionar)
+*.xls
+*.xlsx
+
+# Artifacts intermedios del pipeline (regenerables con build.sh)
+df_full_clean.pkl
+dashboard_data.json
