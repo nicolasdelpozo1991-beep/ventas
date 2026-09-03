@@ -71,7 +71,14 @@ def parse_fecha(raw: pd.Series) -> pd.Series:
     return fecha.dt.normalize()
 
 
-def main(src_xls: str, out_pkl: str):
+# Combinación de columnas que identifica una fila de forma (casi) única en
+# los exports de este sistema. ID_factura_cabeza NO sirve como key: se
+# reusa entre filas no relacionadas. La usa merge_weekly.py para no duplicar
+# filas al mergear un export incremental contra el histórico.
+DEDUPE_KEY = ['ID_file', 'fecha', 'importe_total_mb', 'ID_cliente', 'ID_tipo_de_comprobante']
+
+
+def clean(src_xls: str) -> pd.DataFrame:
     engine = 'openpyxl' if src_xls.lower().endswith('.xlsx') else 'xlrd'
     df = pd.read_excel(src_xls, engine=engine)
     df = resolve_columns(df)
@@ -94,6 +101,11 @@ def main(src_xls: str, out_pkl: str):
     df['mes'] = df['fecha'].values.astype('datetime64[M]')
     df['vid'] = df['vendedor'].map(slug)
 
+    return df
+
+
+def main(src_xls: str, out_pkl: str):
+    df = clean(src_xls)
     df.to_pickle(out_pkl)
     print(f'{len(df)} filas -> {out_pkl}')
     print(f'  rango de fechas: {df.fecha.min().date()} a {df.fecha.max().date()}')

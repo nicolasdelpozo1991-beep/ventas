@@ -5,3 +5,4 @@
 # Artifacts intermedios del pipeline (regenerables con build.sh)
 df_full_clean.pkl
 dashboard_data.json
+__pycache__/
