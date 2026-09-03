@@ -343,6 +343,7 @@
       <svg class="chart" id="chart-evo"></svg>
     </div>
     <div class="card-note">El 26/8 (última fecha del reporte) puede estar algo por debajo de un día típico: el reporte se generó ese mismo día.</div>
+    <div class="card-note" id="evo-objetivos-note"></div>
   </section>
 
   <div class="grid2">
@@ -470,6 +471,19 @@ function labelForChip(id){
   const m = DATA.bucket_meta.find(b=>b.id===id);
   return m ? m.nombre : id;
 }
+
+// Escala de comisión del vendedor sobre su rentabilidad mensual (esquema fijo
+// del área comercial). Se muestra como fondo en Evolución > Rentabilidad,
+// solo con un vendedor individual seleccionado (la comisión es por persona,
+// no tiene sentido sobre "Equipo (total)" ni sobre "Otros") y en vista
+// Mensual (el esquema es mensual, no semanal/diario).
+const COMISION_TIERS = [
+  { min: 0,     pct: 0 },
+  { min: 2000,  pct: 3 },
+  { min: 6500,  pct: 4 },
+  { min: 12000, pct: 5 },
+  { min: 17500, pct: 7 },
+];
 
 const state = { granularity:'monthly', selection:['__total__'], indicator:'facturacion', dateRange:{fromISO:null, toISO:null} };
 
@@ -823,14 +837,44 @@ function renderEvoChart(svgId, key, opts){
     return;
   }
 
+  const single = lines.length===1;
+  const showObjetivos = key==='rentabilidad' && state.granularity==='monthly' && single && !['__total__','otros'].includes(lines[0].id);
+
   let maxV = 0;
   lines.forEach(l=> l.values.forEach(v=> maxV=Math.max(maxV,v)));
+  if(showObjetivos) maxV = Math.max(maxV, COMISION_TIERS[COMISION_TIERS.length-1].min*1.08);
   maxV = niceMax(maxV*1.15);
   const minV = Math.min(0, ...lines.flatMap(l=>l.values));
   const yMin = minV<0 ? -niceMax(-minV*1.15) : 0;
   const y = v => padT + plotH - ((v-yMin)/(maxV-yMin))*plotH;
-  const single = lines.length===1;
   const isBar = state.granularity==='monthly'; // discrete monthly buckets read better as columns than as a line
+
+  const objetivosNote = document.getElementById('evo-objetivos-note');
+  if(objetivosNote){
+    objetivosNote.textContent = showObjetivos
+      ? 'Fondo: escala de comisión sobre rentabilidad mensual — 3% desde $2.000 · 4% desde $6.500 · 5% desde $12.000 · 7% desde $17.500.'
+      : '';
+  }
+
+  // objetivos de comisión: fondo escalonado + líneas de corte por nivel
+  if(showObjetivos){
+    const bandsG = svgEl('g',{});
+    for(let i=1;i<COMISION_TIERS.length;i++){
+      const tier = COMISION_TIERS[i];
+      const next = COMISION_TIERS[i+1];
+      const bandTop = next ? y(next.min) : padT;
+      const bandBottom = y(tier.min);
+      const opacity = 0.05 + (i-1)*0.045;
+      bandsG.appendChild(svgEl('rect',{x:padL, y:bandTop, width:plotW, height:Math.max(bandBottom-bandTop,0), fill:'var(--good)', opacity}));
+    }
+    COMISION_TIERS.forEach(tier=>{
+      if(tier.min===0) return; // el nivel 0% es implícito (debajo del primer corte), no suma marcar la base
+      const lineY = y(tier.min);
+      bandsG.appendChild(svgEl('line',{x1:padL,x2:W-padR,y1:lineY,y2:lineY,stroke:cssVar('--ink-muted'),'stroke-width':1,'stroke-dasharray':'3,3',opacity:0.55}));
+      bandsG.appendChild(svgText(W-padR, lineY-4, tier.pct+'% comisión', 'axis-label','end'));
+    });
+    svg.appendChild(bandsG);
+  }
 
   const g = svgEl('g',{});
   // gridlines (4 steps)
@@ -882,8 +926,10 @@ function renderEvoChart(svgId, key, opts){
     });
     svg.appendChild(bg);
 
-    // direct value-on-cap label only in single-series mode (avoids clutter with multiple vendors)
-    if(single){
+    // direct value-on-cap label only in single-series mode (avoids clutter with multiple vendors);
+    // se omite con el overlay de objetivos activo para no pisarse con las etiquetas de nivel de
+    // comisión — el valor exacto de cada barra sigue disponible al pasar el mouse
+    if(single && !showObjetivos){
       const l = lines[0];
       l.values.forEach((v,i)=>{
         const t = svgText(xGroup(i), y(v)-6, fmtUSD(v,true), 'val-label','middle');
