@@ -460,7 +460,7 @@ function bucketIdxFor(id){ return id==='otros' ? 7 : TEAM_IDS.indexOf(id); }
 function bucketSetForSelection(sel){
   const s = new Set();
   sel.forEach(id=>{
-    if(id==='__total__'){ for(let i=0;i<7;i++) s.add(i); }
+    if(id==='__total__'){ for(let i=0;i<8;i++) s.add(i); } // 7 del equipo + Otros: total real de la operación
     else s.add(bucketIdxFor(id));
   });
   return s;
