@@ -390,7 +390,7 @@
     <div class="card-head">
       <div>
         <h3>Altas</h3>
-        <div class="card-sub">Files nuevos dados de alta por período</div>
+        <div class="card-sub" id="altas-sub">Files nuevos dados de alta por período</div>
       </div>
       <div class="seg" id="altas-gran-seg">
         <button data-g="monthly" class="active">Mensual</button>
@@ -1465,6 +1465,7 @@ function onFiltersChanged(){
   document.getElementById('rank-sub').textContent = 'Equipo (7) + Otros'+(phrase?' · '+phrase:'');
   document.getElementById('margin-sub').textContent = '% sobre facturación neta, Equipo (7) + Otros'+(phrase?' · '+phrase:'');
   document.getElementById('table-sub').textContent = 'Equipo (7) + Otros agrupados · ordenable por columna'+(phrase?' · '+phrase:'');
+  document.getElementById('altas-sub').textContent = 'Files nuevos dados de alta por período'+(phrase?' · '+phrase:'');
 
   document.getElementById('evo-sub').textContent = EVO_LABELS[state.indicator];
   renderKPIs();
