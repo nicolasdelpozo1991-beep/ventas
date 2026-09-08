@@ -389,14 +389,19 @@
   <section class="card">
     <div class="card-head">
       <div>
-        <h3>Principales clientes</h3>
-        <div class="card-sub" id="clientes-sub">Top 10 de <span id="clientes-total">—</span> clientes con facturación en el período</div>
+        <h3>Altas</h3>
+        <div class="card-sub">Files nuevos dados de alta por período</div>
+      </div>
+      <div class="seg" id="altas-gran-seg">
+        <button data-g="monthly" class="active">Mensual</button>
+        <button data-g="weekly">Semanal</button>
+        <button data-g="daily">Diario</button>
       </div>
     </div>
-    <div class="chart-shell" id="chart-clientes-shell">
-      <svg class="chart" id="chart-clientes"></svg>
+    <div class="chart-shell" id="chart-altas-shell">
+      <svg class="chart" id="chart-altas"></svg>
     </div>
-    <div class="card-note" id="clientes-note"></div>
+    <div class="card-note" id="altas-note"></div>
   </section>
 
   <section class="card">
@@ -725,33 +730,6 @@ function combineStats(list){
   return {facturacion,rentabilidad,bruto,notas_credito,n_files,
     margen_pct: facturacion? rentabilidad/facturacion*100:0,
     nc_pct: bruto? -notas_credito/bruto*100:0};
-}
-function computeTopClientes(dFromIdx, dToIdx){
-  const R = DATA.rows, n = R.vb.length;
-  const sums = new Map();
-  const clientesSet = new Set();
-  let total = 0;
-  for(let i=0;i<n;i++){
-    const di = R.d[i];
-    if(dFromIdx!=null && di<dFromIdx) continue;
-    if(dToIdx!=null && di>dToIdx) continue;
-    const c = R.c[i], a = R.a[i];
-    sums.set(c, (sums.get(c)||0)+a);
-    clientesSet.add(c);
-    total += a;
-  }
-  const arr = Array.from(sums.entries()).map(([c,facturacion])=>({nombre:DATA.clientes[c], facturacion}));
-  arr.sort((a,b)=>b.facturacion-a.facturacion);
-  const top5 = arr.slice(0,5).reduce((s,x)=>s+x.facturacion,0);
-  const top10 = arr.slice(0,10).reduce((s,x)=>s+x.facturacion,0);
-  return {
-    top_clientes: arr.slice(0,10),
-    concentracion: {
-      top5_pct: total? Math.round(top5/total*1000)/10 : 0,
-      top10_pct: total? Math.round(top10/total*1000)/10 : 0,
-      n_clientes_total: clientesSet.size,
-    }
-  };
 }
 function periodRangeForDayRange(dFromIdx, dToIdx, granularity){
   if(granularity==='daily') return [dFromIdx==null?0:dFromIdx, dToIdx==null?DATA.fechas.length-1:dToIdx];
@@ -1110,54 +1088,130 @@ function renderMarginChart(){
   });
 }
 
-/* ================= PRINCIPALES CLIENTES ================= */
-function renderClientesChart(){
-  const svg = document.getElementById('chart-clientes');
+/* ================= ALTAS (files nuevos dados de alta, por período) ================= */
+const altasState = { granularity: 'monthly' };
+function altasAxisLabel(iso){
+  return altasState.granularity==='monthly' ? fmtMonth(iso) : fmtDateShort(iso);
+}
+function altasTooltipLabel(iso){
+  if(altasState.granularity==='monthly') return fmtMonth(iso);
+  if(altasState.granularity==='weekly') return 'Sem. del '+fmtDateShort(iso);
+  return fmtDateShort(iso);
+}
+function renderAltasChart(){
+  const svg = document.getElementById('chart-altas');
+  const card = svg.parentElement.parentElement;
   svg.innerHTML='';
-  const rows = state.topClientes;
-  document.getElementById('clientes-total').textContent = fmtInt(state.concentracion.n_clientes_total);
-  document.getElementById('clientes-note').textContent = rows.length
-    ? `Los 5 clientes principales concentran el ${state.concentracion.top5_pct.toString().replace('.',',')}% de la facturación neta del período; los 10 principales, el ${state.concentracion.top10_pct.toString().replace('.',',')}%.`
-    : 'Sin clientes con actividad en el rango seleccionado.';
 
-  if(rows.length===0){ svg.setAttribute('viewBox','0 0 560 60'); return; }
+  if(!DATA.altas){ card.style.display='none'; return; }
 
-  const W=560, rowH=24, gap=6, padL=170, padR=64, padT=6, padB=6;
-  const H = padT+padB+rows.length*(rowH+gap)-gap;
+  const {fromISO, toISO} = state.dateRange;
+  const series = DATA.altas[altasState.granularity]
+    .filter(p => (!fromISO || p.f>=fromISO) && (!toISO || p.f<=toISO));
+
+  document.getElementById('altas-note').textContent = series.length
+    ? ''
+    : 'Sin datos de altas en el rango seleccionado.';
+
+  const W=1160,H=220, padL=54, padR=18, padT=14, padB=30;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
-  const plotW = W-padL-padR;
-  const maxV = niceMax(Math.max(...rows.map(r=>r.facturacion),1)*1.1);
-  const x = v => (v/maxV)*plotW;
 
-  rows.forEach((r,i)=>{
-    const yTop = padT+i*(rowH+gap);
-    const barW = Math.max(2,x(r.facturacion));
-    const g = svgEl('g',{class:'bar-hit'});
-    g.appendChild(svgEl('rect',{x:padL, y:yTop+2, width:barW, height:rowH-4, rx:4, fill:cssVar('--accent')}));
-    const label = r.nombre.length>22? r.nombre.slice(0,21)+'…' : r.nombre;
-    const lbl = svgText(padL-8, yTop+rowH/2+4, label, 'cat-label','end');
-    lbl.setAttribute('font-size','11');
-    g.appendChild(lbl);
-    const fitsInside = barW>70;
-    if(fitsInside){
-      g.appendChild(svgText(padL+barW-8, yTop+rowH/2+4, fmtUSD(r.facturacion,true), 'val-label','end'));
-      g.lastChild.setAttribute('fill', idealTextColor(cssVar('--accent')));
-    } else {
-      g.appendChild(svgText(padL+barW+6, yTop+rowH/2+4, fmtUSD(r.facturacion,true), 'val-label','start'));
-    }
-    const hitRect = svgEl('rect',{x:padL, y:yTop, width:plotW, height:rowH, fill:'transparent'});
-    g.appendChild(hitRect);
-    g.addEventListener('pointermove', evt=>{
+  if(series.length===0){
+    svg.appendChild(svgText(W/2, H/2, 'Sin datos en el rango seleccionado', 'axis-label','middle'));
+    return;
+  }
+
+  const maxV = niceMax(Math.max(...series.map(p=>p.v))*1.15);
+  const y = v => padT + plotH - (v/maxV)*plotH;
+  const color = cssVar('--accent');
+
+  const g = svgEl('g',{});
+  const steps=4;
+  for(let s=0;s<=steps;s++){
+    const v = maxV*s/steps;
+    const yy = y(v);
+    g.appendChild(svgEl('line',{x1:padL,x2:W-padR,y1:yy,y2:yy,class: s===0?'baseline-line':'grid-line'}));
+    g.appendChild(svgText(padL-8,yy+3, fmtInt(Math.round(v)), 'axis-label','end'));
+  }
+  svg.appendChild(g);
+
+  const isBar = altasState.granularity==='monthly';
+
+  if(isBar){
+    const n = series.length;
+    const groupW = plotW/n;
+    const xGroup = i => padL + groupW*(i+0.5);
+    series.forEach((p,i)=> g.appendChild(svgText(xGroup(i), H-8, altasAxisLabel(p.f), 'axis-label','middle')));
+    const barW = Math.max(3, Math.min(28, groupW*0.6));
+
+    const bg = svgEl('g',{});
+    series.forEach((p,i)=>{
+      const top = y(p.v);
+      const h = Math.max(padT+plotH-top,1);
+      bg.appendChild(svgEl('rect',{x:xGroup(i)-barW/2, y:top, width:barW, height:h, rx:Math.min(3,barW/2), fill:color}));
+    });
+    svg.appendChild(bg);
+    series.forEach((p,i)=> g.appendChild(svgText(xGroup(i), y(p.v)-6, fmtInt(p.v), 'val-label','middle')));
+
+    const highlight = svgEl('rect',{x:padL,y:padT,width:groupW,height:plotH, fill:cssVar('--accent-wash'), opacity:0});
+    svg.insertBefore(highlight, bg);
+    const hit = svgEl('rect',{class:'hitlayer', x:padL, y:padT, width:plotW, height:plotH});
+    svg.appendChild(hit);
+    hit.addEventListener('pointermove', evt=>{
+      const pt = svg.createSVGPoint(); pt.x=evt.clientX; pt.y=evt.clientY;
+      const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+      const i = Math.max(0, Math.min(n-1, Math.floor((loc.x-padL)/groupW)));
+      highlight.setAttribute('x', padL+groupW*i);
+      highlight.style.opacity = 1;
       const rect = svg.getBoundingClientRect(); const scale = rect.width/W;
-      showTip(rect.left+(padL+barW)*scale, rect.top+yTop*scale, el=>{
-        ttTitle(el, r.nombre);
-        ttRow(el,'Facturación neta', fmtUSD(r.facturacion), cssVar('--accent'));
+      showTip(rect.left+xGroup(i)*scale, rect.top+padT*scale, el=>{
+        ttTitle(el, altasTooltipLabel(series[i].f));
+        ttRow(el, 'Altas', fmtInt(series[i].v), color);
       });
     });
-    g.addEventListener('pointerleave', hideTip);
-    svg.appendChild(g);
+    hit.addEventListener('pointerleave', ()=>{ highlight.style.opacity=0; hideTip(); });
+    return;
+  }
+
+  const x = i => padL + (series.length===1?0.5:i/(series.length-1))*plotW;
+  const labelEvery = series.length>80?14:(series.length>30?4:(series.length>14?2:1));
+  series.forEach((p,i)=>{
+    if(i%labelEvery!==0 && i!==series.length-1) return;
+    g.appendChild(svgText(x(i), H-8, altasAxisLabel(p.f), 'axis-label','middle'));
   });
+
+  let d = `M${x(0)},${y(series[0].v)}`;
+  series.forEach((p,i)=>{ if(i>0) d+=` L${x(i)},${y(p.v)}`; });
+  const areaD = d + ` L${x(series.length-1)},${y(0)} L${x(0)},${y(0)} Z`;
+  g.appendChild(svgEl('path',{d:areaD, fill:color, opacity:0.10, stroke:'none'}));
+  g.appendChild(svgEl('path',{d, fill:'none', stroke:color,'stroke-width':2,'stroke-linejoin':'round','stroke-linecap':'round'}));
+
+  const hit = svgEl('rect',{class:'hitlayer', x:padL, y:padT, width:plotW, height:plotH});
+  svg.appendChild(hit);
+  const crosshair = svgEl('line',{class:'crosshair', x1:padL,x2:padL,y1:padT,y2:padT+plotH});
+  svg.appendChild(crosshair);
+  hit.addEventListener('pointermove', evt=>{
+    const pt = svg.createSVGPoint(); pt.x=evt.clientX; pt.y=evt.clientY;
+    const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+    const i = Math.max(0, Math.min(series.length-1, Math.round((loc.x-padL)/plotW*(series.length-1))));
+    crosshair.setAttribute('x1', x(i)); crosshair.setAttribute('x2', x(i)); crosshair.style.opacity=1;
+    const rect = svg.getBoundingClientRect(); const scale = rect.width/W;
+    showTip(rect.left+x(i)*scale, rect.top+y(series[i].v)*scale, el=>{
+      ttTitle(el, altasTooltipLabel(series[i].f));
+      ttRow(el, 'Altas', fmtInt(series[i].v), color);
+    });
+  });
+  hit.addEventListener('pointerleave', ()=>{ crosshair.style.opacity=0; hideTip(); });
 }
+document.querySelectorAll('#altas-gran-seg button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#altas-gran-seg button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    altasState.granularity = btn.dataset.g;
+    renderAltasChart();
+  });
+});
 
 /* ================= SCATTER: facturación vs margen % ================= */
 function renderScatterChart(){
@@ -1406,9 +1460,6 @@ function onFiltersChanged(){
   document.getElementById('period-btn-label').textContent = 'Período: '+periodLabel();
   const [dF,dT] = getDayIdxRange();
   state.bucketStats = computeBucketStats(dF,dT);
-  const cli = computeTopClientes(dF,dT);
-  state.topClientes = cli.top_clientes;
-  state.concentracion = cli.concentracion;
 
   const phrase = periodPhrase();
   document.getElementById('rank-sub').textContent = 'Equipo (7) + Otros'+(phrase?' · '+phrase:'');
@@ -1420,7 +1471,7 @@ function onFiltersChanged(){
   renderEvoChart('chart-evo', state.indicator, {pct:false});
   renderRankChart();
   renderMarginChart();
-  renderClientesChart();
+  renderAltasChart();
   renderScatterChart();
   renderTable();
 }
@@ -1437,6 +1488,6 @@ function renderAll(){
 renderAll();
 window.addEventListener('resize', ()=>{
   renderEvoChart('chart-evo', state.indicator, {pct:false});
-  renderRankChart(); renderMarginChart(); renderClientesChart(); renderScatterChart();
+  renderRankChart(); renderMarginChart(); renderAltasChart(); renderScatterChart();
 });
 </script>
