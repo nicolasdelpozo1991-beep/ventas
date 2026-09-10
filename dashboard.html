@@ -339,6 +339,8 @@
       <button class="chip" id="export-csv-btn">⇩ Planilla</button>
       <button class="chip" id="export-pdf-btn">⇩ PDF</button>
       <span class="export-status hidden" id="export-status"></span>
+      <div class="vbar"></div>
+      <button class="chip" id="theme-toggle" title="Cambiar tema claro/oscuro">🌙</button>
     </div>
   </div>
 
@@ -1601,6 +1603,30 @@ document.getElementById('export-csv-btn').addEventListener('click', async ()=>{
 document.getElementById('export-pdf-btn').addEventListener('click', ()=>{
   window.print();
 });
+
+/* ================= TEMA CLARO/OSCURO ================= */
+(function initTheme(){
+  const KEY = 'pulso-comercial-theme';
+  const root = document.documentElement;
+  const btn = document.getElementById('theme-toggle');
+  const systemPrefersDark = () => window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  function apply(theme){
+    // theme: 'dark' | 'light' | null (sigue la preferencia del sistema)
+    if(theme==='dark' || theme==='light') root.dataset.theme = theme;
+    else delete root.dataset.theme;
+    const effectiveDark = theme==='dark' || (theme!=='light' && systemPrefersDark());
+    btn.textContent = effectiveDark ? '☀️' : '🌙';
+  }
+  let stored = null;
+  try{ stored = localStorage.getItem(KEY); }catch{}
+  apply(stored);
+  btn.addEventListener('click', ()=>{
+    const current = root.dataset.theme || (systemPrefersDark() ? 'dark' : 'light');
+    const next = current==='dark' ? 'light' : 'dark';
+    try{ localStorage.setItem(KEY, next); }catch{}
+    apply(next);
+  });
+})();
 
 /* ================= ORCHESTRATION ================= */
 function onFiltersChanged(){
