@@ -190,6 +190,21 @@
   .card-sub{font-size:12.5px;color:var(--ink-muted);margin-top:3px;}
   .card-note{font-size:11.5px;color:var(--ink-muted);margin-top:10px;border-top:1px solid var(--border);padding-top:8px;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+
+  /* compare periods */
+  .compare-controls{display:flex;flex-wrap:wrap;gap:10px 24px;margin-bottom:16px;}
+  .compare-period{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+  .compare-period .dot{width:9px;height:9px;border-radius:3px;flex:none;}
+  .compare-period label{font-size:11px;font-weight:700;color:var(--ink-soft);white-space:nowrap;}
+  .compare-period input[type=date]{
+    border:1px solid var(--border-strong);border-radius:7px;padding:6px 7px;
+    background:var(--surface);color:var(--ink);font-size:12px;font-family:inherit;color-scheme:inherit;
+  }
+  .compare-period .to{color:var(--ink-muted);font-size:12px;}
+  .compare-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .compare-panel-title{font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:2px;}
+  .pill.good{background:color-mix(in srgb, var(--good) 16%, transparent);color:var(--good);}
+  .pill.bad{background:color-mix(in srgb, var(--bad) 16%, transparent);color:var(--bad);}
   .legend-row{display:flex;gap:14px;flex-wrap:wrap;margin:8px 0 2px;}
   .legend-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-soft);font-weight:500;}
   .legend-item .lk{width:12px;height:2.5px;border-radius:2px;}
@@ -247,6 +262,7 @@
   @media (max-width:920px){
     .kpis{grid-template-columns:repeat(2,1fr);}
     .grid2{grid-template-columns:1fr;}
+    .compare-charts{grid-template-columns:1fr;}
     header.top{flex-direction:column;align-items:flex-start;}
     .filterbar-right{margin-left:0;}
   }
@@ -344,6 +360,38 @@
     </div>
     <div class="card-note">El 26/8 (última fecha del reporte) puede estar algo por debajo de un día típico: el reporte se generó ese mismo día.</div>
     <div class="card-note" id="evo-objetivos-note"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h3>Comparar períodos</h3>
+        <div class="card-sub" id="compare-sub">Facturación y rentabilidad, según selección de vendedor</div>
+      </div>
+    </div>
+    <div class="compare-controls">
+      <div class="compare-period">
+        <span class="dot" id="cmp-a-dot"></span>
+        <label for="cmp-a-from">Período A</label>
+        <input type="date" id="cmp-a-from"> <span class="to">a</span> <input type="date" id="cmp-a-to">
+      </div>
+      <div class="compare-period">
+        <span class="dot" id="cmp-b-dot"></span>
+        <label for="cmp-b-from">Período B</label>
+        <input type="date" id="cmp-b-from"> <span class="to">a</span> <input type="date" id="cmp-b-to">
+      </div>
+    </div>
+    <div class="compare-charts">
+      <div>
+        <div class="compare-panel-title">Facturación neta</div>
+        <div class="chart-shell"><svg class="chart" id="chart-cmp-fact"></svg></div>
+      </div>
+      <div>
+        <div class="compare-panel-title">Rentabilidad neta</div>
+        <div class="chart-shell"><svg class="chart" id="chart-cmp-rent"></svg></div>
+      </div>
+    </div>
+    <div class="card-note" id="compare-note"></div>
   </section>
 
   <div class="grid2">
@@ -1213,6 +1261,104 @@ document.querySelectorAll('#altas-gran-seg button').forEach(btn=>{
   });
 });
 
+/* ================= COMPARAR PERÍODOS ================= */
+function calendarMonthEnd(startISO){
+  const [y,m] = startISO.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0,10); // día 0 del mes siguiente = último día de este mes
+}
+function compareDefaults(){
+  // últimos dos meses completos de la base (si el mes en curso está parcial, se ignora como default —
+  // comparar un mes entero contra unos pocos días da variaciones sin sentido)
+  const meses = DATA.meses;
+  const isComplete = i => DATA.meta.fecha_max >= calendarMonthEnd(meses[i]);
+  let idxB = meses.length-1;
+  if(!isComplete(idxB) && idxB>0) idxB--;
+  const idxA = idxB>0 ? idxB-1 : idxB;
+  const bFrom = meses[idxB];
+  const bTo = isComplete(idxB) ? calendarMonthEnd(meses[idxB]) : DATA.meta.fecha_max;
+  const aFrom = meses[idxA];
+  const aTo = idxA!==idxB ? calendarMonthEnd(meses[idxA]) : bTo;
+  return {aFrom, aTo, bFrom, bTo};
+}
+function aggForRange(fromISO, toISO){
+  const dF = dayIdxFromISO(fromISO,'floor');
+  const dT = dayIdxFromISO(toISO,'ceil');
+  const set = bucketSetForSelection(state.selection);
+  const stats = computeBucketStats(dF,dT).filter((b,i)=>set.has(i));
+  return combineStats(stats);
+}
+function renderComparePanel(svgId, valA, valB){
+  const svg = document.getElementById(svgId);
+  svg.innerHTML='';
+  const W=460,H=190, padT=40, padB=34, padSide=60;
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  const plotH = H-padT-padB;
+  const maxV = niceMax(Math.max(Math.abs(valA),Math.abs(valB),1)*1.2);
+  const y0 = H-padB;
+  const y = v => y0 - (v/maxV)*plotH;
+  const colorA = cssVar('--slot-otros'), colorB = cssVar('--accent');
+  const barW = 74, gap = 56;
+  const cx = W/2;
+  const xA = cx - gap/2 - barW;
+  const xB = cx + gap/2;
+
+  svg.appendChild(svgEl('line',{x1:padSide-20,x2:W-padSide+20,y1:y0,y2:y0,class:'baseline-line'}));
+
+  [['A',xA,valA,colorA],['B',xB,valB,colorB]].forEach(([lbl,x,v,color])=>{
+    const top = Math.min(y(0),y(v));
+    const h = Math.max(Math.abs(y(v)-y(0)),1);
+    svg.appendChild(svgEl('rect',{x, y:top, width:barW, height:h, rx:4, fill:color}));
+    svg.appendChild(svgText(x+barW/2, y(v)-8, fmtUSD(v,true), 'val-label','middle'));
+    svg.appendChild(svgText(x+barW/2, H-10, lbl, 'cat-label','middle'));
+  });
+
+  let deltaTxt;
+  if(valA===0 && valB===0) deltaTxt='=';
+  else if(valA===0) deltaTxt = valB>0 ? 'B es nuevo' : '—';
+  else deltaTxt = fmtPct((valB-valA)/Math.abs(valA)*100)+' vs A';
+  const good = valB>=valA;
+  const t = svgText(cx, 18, deltaTxt, 'val-label','middle');
+  t.setAttribute('fill', good?cssVar('--good'):cssVar('--bad'));
+  svg.appendChild(t);
+}
+function renderCompare(){
+  const aFrom = document.getElementById('cmp-a-from').value;
+  const aTo = document.getElementById('cmp-a-to').value;
+  const bFrom = document.getElementById('cmp-b-from').value;
+  const bTo = document.getElementById('cmp-b-to').value;
+  if(!aFrom || !aTo || !bFrom || !bTo) return;
+
+  const aggA = aggForRange(aFrom, aTo);
+  const aggB = aggForRange(bFrom, bTo);
+
+  renderComparePanel('chart-cmp-fact', aggA.facturacion, aggB.facturacion);
+  renderComparePanel('chart-cmp-rent', aggA.rentabilidad, aggB.rentabilidad);
+
+  document.getElementById('compare-sub').textContent =
+    'Facturación y rentabilidad, según selección de vendedor · A: '+fmtDateShort(aFrom)+'–'+fmtDateShort(aTo)+
+    ' · B: '+fmtDateShort(bFrom)+'–'+fmtDateShort(bTo);
+
+  const parts=[];
+  if(aggA.facturacion!==0) parts.push('Facturación '+fmtPct((aggB.facturacion-aggA.facturacion)/Math.abs(aggA.facturacion)*100));
+  if(aggA.rentabilidad!==0) parts.push('Rentabilidad '+fmtPct((aggB.rentabilidad-aggA.rentabilidad)/Math.abs(aggA.rentabilidad)*100));
+  document.getElementById('compare-note').textContent = parts.length? parts.join(' · ')+' (Período B vs Período A)' : '';
+}
+function initCompare(){
+  const d = compareDefaults();
+  document.getElementById('cmp-a-from').value = d.aFrom;
+  document.getElementById('cmp-a-to').value = d.aTo;
+  document.getElementById('cmp-b-from').value = d.bFrom;
+  document.getElementById('cmp-b-to').value = d.bTo;
+  ['cmp-a-from','cmp-a-to','cmp-b-from','cmp-b-to'].forEach(id=>{
+    const el = document.getElementById(id);
+    el.min = FMIN; el.max = FMAX;
+    el.addEventListener('change', renderCompare);
+  });
+  document.getElementById('cmp-a-dot').style.background = cssVar('--slot-otros');
+  document.getElementById('cmp-b-dot').style.background = cssVar('--accent');
+  renderCompare();
+}
+
 /* ================= SCATTER: facturación vs margen % ================= */
 function renderScatterChart(){
   const svg = document.getElementById('chart-scatter');
@@ -1367,6 +1513,7 @@ function buildChips(){
       document.getElementById('evo-sub').textContent = EVO_LABELS[state.indicator];
       renderKPIs();
       renderEvoChart('chart-evo', state.indicator, {pct:false});
+      renderCompare();
     });
     wrap.appendChild(chip);
   });
@@ -1485,10 +1632,11 @@ function renderAll(){
   document.getElementById('foot-updated').textContent = 'Generado '+updatedLong;
   buildChips();
   onFiltersChanged();
+  initCompare();
 }
 renderAll();
 window.addEventListener('resize', ()=>{
   renderEvoChart('chart-evo', state.indicator, {pct:false});
-  renderRankChart(); renderMarginChart(); renderAltasChart(); renderScatterChart();
+  renderRankChart(); renderMarginChart(); renderAltasChart(); renderScatterChart(); renderCompare();
 });
 </script>
