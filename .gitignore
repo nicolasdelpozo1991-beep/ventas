@@ -1,6 +1,10 @@
 # Inputs crudos del sistema de facturación (privados, no versionar)
+# El export a veces viene en mayúsculas (.XLS) — git ignora por case, así
+# que van las dos variantes de cada extensión.
 *.xls
+*.XLS
 *.xlsx
+*.XLSX
 
 # Artifacts intermedios del pipeline (regenerables con build.sh)
 df_full_clean.pkl
